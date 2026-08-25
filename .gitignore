@@ -1,0 +1,13 @@
+# Processed data — large files, reproducible by running 01_data_cleaning.ipynb
+data/processed/
+
+# Jupyter notebook checkpoints
+.ipynb_checkpoints/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# OS files
+.DS_Store
+Thumbs.db
