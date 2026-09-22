@@ -157,9 +157,33 @@
 -- Expected outcome: Fossil share may have increased, nuclear/hydro relatively stable
 
 -- <query here>
+    SELECT
+        production_type,
+        ROUND(AVG(generation_mw) FILTER (
+            WHERE EXTRACT(YEAR FROM timestamp) BETWEEN 2018 AND 2021
+        ), 2) AS pre_crisis_avg_mw,
+        ROUND(AVG(generation_mw) FILTER (
+            WHERE EXTRACT(YEAR FROM timestamp) BETWEEN 2022 AND 2023
+        ), 2) AS crisis_avg_mw
+    FROM finland_generation_mix
+    WHERE EXTRACT(YEAR FROM timestamp) BETWEEN 2018 AND 2023
+    GROUP BY production_type
+    HAVING ROUND(AVG(generation_mw), 2) > 0
+    ORDER BY production_type;
+
 
 -- Answer/Analysis:
--- [fill in after running]
+
+-- Nuclear: 2558.52 to 3240.45 MW (~27% increase) — biggest absolute gain, tracks with OL3
+-- Wind Onshore: 746.78 to 1433.44 MW (~92% increase) — fastest proportional growth
+-- Hydro roughly flat (1506.59 to 1524.44) — stable baseline, not a crisis response
+-- Solar not comparable — reporting only begins 2023, pre-crisis 0.00 isn't real data
+
+-- Contrary to the query's expected outcome, all fossil sources DECREASED during the crisis:
+-- Gas (-60%), Hard Coal (-33%), Peat (-18%)
+
+-- Key finding: Finland leaned on nuclear + wind during the crisis, not fossil backup —
+-- early evidence for the "domestic supply mix" side of the core project question
 
 
 -- ============================================================
@@ -173,8 +197,39 @@
 
 -- <query here>
 
+    WITH generation_with_totals AS (
+        SELECT
+            production_type,
+            timestamp,
+            EXTRACT(YEAR FROM timestamp) AS year,
+            EXTRACT(QUARTER FROM timestamp) AS quarter,
+            generation_mw,
+            SUM(generation_mw) OVER (PARTITION BY timestamp) AS hourly_total_mw
+        FROM finland_generation_mix
+        WHERE EXTRACT(YEAR FROM timestamp) BETWEEN 2021 AND 2024
+    )
+    SELECT
+        year,
+        quarter,
+        ROUND(AVG(generation_mw), 2) AS nuclear_avg_mw,
+        ROUND(AVG(hourly_total_mw), 2) AS avg_hourly_total_mw,
+        ROUND(AVG(generation_mw) / AVG(hourly_total_mw) * 100, 2) AS nuclear_share_pct
+    FROM generation_with_totals
+    WHERE production_type = 'Nuclear'
+    GROUP BY year, quarter
+    ORDER BY year, quarter;
+
 -- Answer/Analysis:
--- [fill in after running]
+
+    -- Nuclear share steady in 32-44% range from Q1 2021 to Q1 2023
+    -- Clear step-change from Q2 2023: jumps to 48.61%, then 49.81% Q3 2023 — right when
+    -- OL3 entered regular commercial operation (Apr 2023)
+    -- Confirmed real, not just a ratio effect: nuclear_avg_mw itself rises too (3171→3881 MW)
+    -- Share eases slightly through 2024 (37-45%) but stays above pre-2023 levels — OL3 now
+    -- part of the baseline mix, not a temporary spike
+
+    -- Key finding: clearest evidence yet for the "domestic supply" side of the core question —
+    -- a specific, dateable jump tied directly to OL3, distinct from general crisis timing
 
 
 -- Q7: Monthly nuclear share vs average price 2021-2024
