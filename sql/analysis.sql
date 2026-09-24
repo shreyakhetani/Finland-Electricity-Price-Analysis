@@ -238,8 +238,48 @@
 
 -- <query here>
 
+    WITH generation_with_totals AS (
+        SELECT
+            gm.production_type,
+            gm.timestamp,
+            EXTRACT(YEAR FROM gm.timestamp) AS year,
+            EXTRACT(MONTH FROM gm.timestamp) AS month,
+            gm.generation_mw,
+            SUM(gm.generation_mw) OVER (PARTITION BY gm.timestamp) AS hourly_total_mw,
+            fp.price_eur_mwh
+        FROM finland_generation_mix gm
+        LEFT JOIN finland_price fp ON gm.timestamp = fp.timestamp
+        WHERE EXTRACT(YEAR FROM gm.timestamp) BETWEEN 2021 AND 2024
+    )
+    SELECT
+        year,
+        month,
+        ROUND(AVG(generation_mw), 2) AS nuclear_avg_mw,
+        ROUND(AVG(hourly_total_mw), 2) AS avg_hourly_total_mw,
+        ROUND(AVG(generation_mw) / AVG(hourly_total_mw) * 100, 2) AS nuclear_share_pct,
+        ROUND(AVG(price_eur_mwh), 2) AS avg_price
+    FROM generation_with_totals
+    WHERE production_type = 'Nuclear'
+    GROUP BY year, month
+    ORDER BY year, month;
+
 -- Answer/Analysis:
--- [fill in after running]
+    -- 2021-2022: nuclear share stays in a normal 30-48% range both years, but price is wildly
+    -- different (2021: 36-193, 2022: 79-261) — share doesn't explain 2022's extreme prices,
+    -- confirms something external (gas crisis) was the real driver that year
+
+    -- 2023 onward: share climbs above the old range, peaking at 60.54% (Jul 2023), price
+    -- drops sharply in the same window (32.94) — negative correlation shows up clearly here
+
+    -- 2024 strongest case: Jul-Aug high share (50-46%) paired with lowest prices in dataset
+    -- (16.78, 12.53)
+
+    -- Not clean throughout though — Jul 2021 has high share (47.99%) AND high price (78.74),
+    -- opposite of expected, showing link is inconsistent before OL3
+
+    -- Key finding: negative correlation is real but only clear from 2023 onward, once OL3
+    -- pushed nuclear share meaningfully higher — in 2021-2022 price was driven by something
+    -- else entirely (external gas crisis), not nuclear share
 
 
 -- Q8: Wind-price correlation stratified by season
@@ -249,8 +289,40 @@
 
 -- <query here>
 
+    SELECT
+        CASE
+            WHEN EXTRACT(MONTH FROM gm.timestamp) IN(12,1, 2) THEN 'Winter'
+            WHEN EXTRACT(MONTH FROM gm.timestamp) IN (3,4,5) THEN 'Spring'
+            WHEN EXTRACT(MONTH FROM gm.timestamp) IN (6,7,8) THEN 'Summer'
+            ELSE 'Autumn'
+            END AS season,
+        ROUND(AVG( gm.generation_mw), 2) AS avg_wind_mw,
+        ROUND(AVG(fp.price_eur_mwh),2) AS avg_price
+    FROM finland_generation_mix gm
+    LEFT JOIN finland_price fp ON gm.timestamp = fp.timestamp
+    WHERE gm.production_type = 'Wind Onshore'
+    GROUP BY 
+        CASE
+            WHEN EXTRACT(MONTH FROM gm.timestamp) IN (12, 1, 2) THEN 'Winter'
+            WHEN EXTRACT(MONTH FROM gm.timestamp) IN (3, 4, 5) THEN 'Spring'
+            WHEN EXTRACT(MONTH FROM gm.timestamp) IN (6, 7, 8) THEN 'Summer'
+            ELSE 'Autumn'
+        END
+    ORDER BY avg_wind_mw DESC;
+
 -- Answer/Analysis:
--- [fill in after running]
+
+    -- Wind highest in Winter (1609 MW), lowest in Summer (811 MW) — roughly doubles winter vs summer
+
+    -- Price does NOT follow "more wind = lower price": Winter has BOTH highest wind AND
+    -- highest price (74.24) — opposite of expected
+
+    -- Caveat: this shows seasonal averages only, not true within-season correlation — winter's
+    -- high price likely driven by heating demand, not wind. A proper test would need CORR()
+    -- or month-by-month variation within each season, not one pooled number per season
+
+    -- Key finding: at this level, wind shows no negative relationship with price — demand
+    -- appears to dominate wind's effect, contrary to the query's expected outcome
 
 
 -- ============================================================
