@@ -334,10 +334,42 @@
 -- Question: How do post-crisis prices and generation mix compare to the pre-crisis baseline?
 -- Expected outcome: Prices lower than 2022 peak but pattern may differ from pre-crisis baseline
 
--- <query here>
+-- <query 1>
+        SELECT 
+            EXTRACT(YEAR FROM timestamp) AS year,
+            ROUND(AVG(price_eur_mwh), 2) AS avg_price_mwh
+        FROM finland_price
+        WHERE EXTRACT(YEAR FROM timestamp) IN (2018, 2023, 2024, 2025)
+        GROUP BY year
+        ORDER BY year;
+-- <query 2>
+
+        SELECT 
+            EXTRACT(YEAR FROM timestamp) AS year,
+            production_type,
+            ROUND(AVG(generation_mw),2) AS avg_generation_mw
+        FROM finland_generation_mix
+        WHERE EXTRACT(YEAR FROM timestamp) IN (2018, 2023, 2024, 2025)
+        GROUP BY production_type, year
+        HAVING ROUND(AVG(generation_mw),2) > 0
+        ORDER BY production_type, year;
 
 -- Answer/Analysis:
--- [fill in after running]
+
+    -- Price (EUR/MWh): 2018 = 46.80, 2023 = 56.47, 2024 = 45.58, 2025 = 40.48
+    -- 2023 still elevated by early-year crisis prices; 2024 is back to 2018 level,
+    -- 2025 is below it
+
+    -- Nuclear: 2498 MW (2018) to 3730 (2023), then plateau at ~3540-3570 (2024-2025)
+    -- a one-time step up from OL3, not continued growth
+    -- Wind Onshore: 615 to 1600 to 2215 to 2460 MW, about 4x since 2018 and still growing
+    -- Fossil fell in every period: Gas 571 to 99, Hard coal 682 to 44, Peat 488 to 129 MW
+    -- Hydro roughly flat (1369-1637 MW), varies with rainfall
+    -- Solar only comparable from 2023 (97 to 149 MW), earlier zeros are a reporting gap
+
+    -- Key finding: the new normal is a nuclear + wind mix with almost no fossil generation,
+    -- and prices are at or below the pre-crisis level. Consistent with the domestic supply
+    -- explanation, but not proof, since European gas prices also fell in the same period
 
 
 -- Q10: Crisis period summary table
@@ -347,5 +379,84 @@
 
 -- <query here>
 
+        WITH price_summary AS (
+            SELECT
+                CASE
+                    WHEN EXTRACT(YEAR FROM fp.timestamp) BETWEEN 2018 AND 2020 THEN 'Pre-crisis'
+                    WHEN EXTRACT(YEAR FROM fp.timestamp) = 2021 THEN 'Early crisis'
+                    WHEN EXTRACT(YEAR FROM fp.timestamp) = 2022 THEN 'Crisis'
+                    WHEN EXTRACT(YEAR FROM fp.timestamp) = 2023 THEN 'Recovery'
+                    WHEN EXTRACT(YEAR FROM fp.timestamp) BETWEEN 2024 AND 2025 THEN 'New normal'
+                END AS period,
+                CASE
+                    WHEN EXTRACT(YEAR FROM fp.timestamp) BETWEEN 2018 AND 2020 THEN 1
+                    WHEN EXTRACT(YEAR FROM fp.timestamp) = 2021 THEN 2
+                    WHEN EXTRACT(YEAR FROM fp.timestamp) = 2022 THEN 3
+                    WHEN EXTRACT(YEAR FROM fp.timestamp) = 2023 THEN 4
+                    WHEN EXTRACT(YEAR FROM fp.timestamp) BETWEEN 2024 AND 2025 THEN 5
+                END AS period_order,
+                ROUND(AVG(fp.price_eur_mwh), 2) AS finland_avg_price,
+                ROUND(AVG(sp.price_eur_mwh), 2) AS sweden_avg_price,
+                ROUND(AVG(fp.price_eur_mwh) - AVG(sp.price_eur_mwh), 2) AS fi_se_spread
+            FROM finland_price fp
+            LEFT JOIN sweden_price sp ON fp.timestamp = sp.timestamp
+            WHERE EXTRACT(YEAR FROM fp.timestamp) BETWEEN 2018 AND 2025
+            GROUP BY period, period_order
+        ),
+
+        hourly_mix AS (
+            SELECT
+                timestamp,
+                SUM(generation_mw) AS total_mw,
+                SUM(generation_mw) FILTER (WHERE production_type = 'Nuclear') AS nuclear_mw,
+                SUM(generation_mw) FILTER (WHERE production_type = 'Wind Onshore') AS wind_mw
+            FROM finland_generation_mix
+            WHERE EXTRACT(YEAR FROM timestamp) BETWEEN 2018 AND 2025
+            GROUP BY timestamp
+        ),
+
+        mix_summary AS (
+            SELECT
+                CASE
+                    WHEN EXTRACT(YEAR FROM timestamp) BETWEEN 2018 AND 2020 THEN 'Pre-crisis'
+                    WHEN EXTRACT(YEAR FROM timestamp) = 2021 THEN 'Early crisis'
+                    WHEN EXTRACT(YEAR FROM timestamp) = 2022 THEN 'Crisis'
+                    WHEN EXTRACT(YEAR FROM timestamp) = 2023 THEN 'Recovery'
+                    WHEN EXTRACT(YEAR FROM timestamp) BETWEEN 2024 AND 2025 THEN 'New normal'
+                END AS period,
+                ROUND(SUM(nuclear_mw) / SUM(total_mw) * 100, 2) AS nuclear_share_pct,
+                ROUND(SUM(wind_mw) / SUM(total_mw) * 100, 2) AS wind_share_pct
+            FROM hourly_mix
+            GROUP BY period
+        )
+
+        SELECT
+            p.period,
+            p.finland_avg_price,
+            p.sweden_avg_price,
+            p.fi_se_spread,
+            m.nuclear_share_pct,
+            m.wind_share_pct
+        FROM price_summary p
+        JOIN mix_summary m ON p.period = m.period
+        ORDER BY p.period_order;
+
 -- Answer/Analysis:
--- [fill in after running]
+
+    -- Price (EUR/MWh): 39.61 -> 72.34 -> 154.07 (Crisis) -> 56.47 -> 43.03
+    -- Crisis was ~4x pre-crisis; new normal is only ~9% above baseline
+
+    -- FI-SE spread: 4.93 -> 7.99 -> 34.24 (Crisis) -> 4.79 -> 3.68
+    -- Finland's extra premium over Sweden peaked in 2022 and was gone by 2023
+
+    -- Nuclear share: 36.4% -> 35.5% -> 37.9% -> 44.2% (Recovery) -> 39.7%
+    -- Step-up in 2023 matches OL3; the later dip is because wind grew the total,
+    -- not because nuclear output fell
+
+    -- Wind share: 9.9% -> 12.4% -> 17.5% -> 19.0% -> 26.1% (~2.6x since pre-crisis)
+
+    -- Key finding: both mattered. External factors (European gas) drove the 2022 spike,
+    -- since Sweden's price also rose and fell (119.83 -> 51.68). Domestic supply (OL3 + wind)
+    -- explains why Finland's extra premium over Sweden disappeared
+
+    -- Caveat: period averages show timing and association, not proof of cause
